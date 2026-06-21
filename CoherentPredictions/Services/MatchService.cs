@@ -25,8 +25,8 @@ public class MatchService
                               SELECT m.match_id, m.team1, m.team2, m.score, m.[datetime]
                               FROM Matches m
                               WHERE m.score IS NULL
-                                AND m.[datetime] > SYSDATETIME()
-                                AND m.[datetime] <= DATEADD(HOUR, 24, SYSDATETIME())
+                                AND m.[datetime] > DATEADD(HOUR, 3, SYSDATETIME())
+                                AND m.[datetime] <= DATEADD(HOUR, 27, SYSDATETIME())
                                 AND NOT EXISTS (
                                     SELECT 1
                                     FROM Predictions p
