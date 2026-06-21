@@ -10,6 +10,7 @@ var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.Configure<TelegramOptions>(builder.Configuration.GetSection(TelegramOptions.SectionName));
 builder.Services.Configure<SqlOptions>(builder.Configuration.GetSection(SqlOptions.SectionName));
+builder.Services.Configure<AdminOptions>(builder.Configuration.GetSection(AdminOptions.SectionName));
 
 builder.Services.AddSingleton<ITelegramBotClient>(sp =>
 {

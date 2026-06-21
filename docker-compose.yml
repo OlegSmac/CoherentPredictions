@@ -7,6 +7,7 @@ services:
     environment:
       Telegram__BotToken: "${TELEGRAM_BOT_TOKEN}"
       ConnectionStrings__Default: "${DB_CONNECTION}"
+      Admin__TelegramUserId: "${ADMIN_TELEGRAM_USER_ID}"
     networks:
       - ridersolution_appnet
     restart: unless-stopped
