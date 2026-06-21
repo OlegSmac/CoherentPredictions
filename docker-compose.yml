@@ -1,0 +1,16 @@
+services:
+  coherent-predictions-bot:
+    build:
+      context: .
+      dockerfile: CoherentPredictions/Dockerfile
+    container_name: coherent-predictions-bot
+    environment:
+      Telegram__BotToken: "${TELEGRAM_BOT_TOKEN}"
+      ConnectionStrings__Default: "${DB_CONNECTION}"
+    networks:
+      - ridersolution_appnet
+    restart: unless-stopped
+
+networks:
+  ridersolution_appnet:
+    external: true
