@@ -21,53 +21,37 @@ public class LeaderboardService
         command.CommandText = """
                               SELECT
                                   u.name,
-                                  SUM(
+                                  COALESCE(SUM(
                                       CASE
                                           WHEN p.score = m.score THEN 3
-                              
-                                          WHEN
-                                              (
-                                                  LEFT(p.score, CHARINDEX(':', p.score) - 1) >
-                                                  SUBSTRING(p.score, CHARINDEX(':', p.score) + 1, 10)
-                              
-                                                  AND
-                              
-                                                  LEFT(m.score, CHARINDEX(':', m.score) - 1) >
-                                                  SUBSTRING(m.score, CHARINDEX(':', m.score) + 1, 10)
-                                              )
-                                          THEN 1
-                              
-                                          WHEN
-                                              (
-                                                  LEFT(p.score, CHARINDEX(':', p.score) - 1) <
-                                                  SUBSTRING(p.score, CHARINDEX(':', p.score) + 1, 10)
-                              
-                                                  AND
-                              
-                                                  LEFT(m.score, CHARINDEX(':', m.score) - 1) <
-                                                  SUBSTRING(m.score, CHARINDEX(':', m.score) + 1, 10)
-                                              )
-                                          THEN 1
-                              
-                                          WHEN
-                                              (
-                                                  LEFT(p.score, CHARINDEX(':', p.score) - 1) =
-                                                  SUBSTRING(p.score, CHARINDEX(':', p.score) + 1, 10)
-                              
-                                                  AND
-                              
-                                                  LEFT(m.score, CHARINDEX(':', m.score) - 1) =
-                                                  SUBSTRING(m.score, CHARINDEX(':', m.score) + 1, 10)
-                                              )
-                                          THEN 1
-                              
+
+                                          WHEN ps.p1 IS NULL OR ps.p2 IS NULL OR ms.m1 IS NULL OR ms.m2 IS NULL THEN 0
+
+                                          WHEN ps.p1 > ps.p2 AND ms.m1 > ms.m2 THEN 1
+                                          WHEN ps.p1 < ps.p2 AND ms.m1 < ms.m2 THEN 1
+                                          WHEN ps.p1 = ps.p2 AND ms.m1 = ms.m2 THEN 1
+
                                           ELSE 0
                                       END
-                                  ) AS points
+                                  ), 0) AS points
                               FROM Users u
                               LEFT JOIN Predictions p ON p.user_id = u.user_id
-                              LEFT JOIN Matches m ON m.match_id = p.match_id
-                              WHERE m.score IS NOT NULL
+                              LEFT JOIN Matches m ON m.match_id = p.match_id AND m.score IS NOT NULL
+
+                              OUTER APPLY (
+                                  SELECT
+                                      TRY_CONVERT(INT, LEFT(LTRIM(RTRIM(p.score)), CHARINDEX(':', LTRIM(RTRIM(p.score))) - 1)) AS p1,
+                                      TRY_CONVERT(INT, SUBSTRING(LTRIM(RTRIM(p.score)), CHARINDEX(':', LTRIM(RTRIM(p.score))) + 1, 10)) AS p2
+                                  WHERE p.score IS NOT NULL AND CHARINDEX(':', p.score) > 0
+                              ) ps
+
+                              OUTER APPLY (
+                                  SELECT
+                                      TRY_CONVERT(INT, LEFT(LTRIM(RTRIM(m.score)), CHARINDEX(':', LTRIM(RTRIM(m.score))) - 1)) AS m1,
+                                      TRY_CONVERT(INT, SUBSTRING(LTRIM(RTRIM(m.score)), CHARINDEX(':', LTRIM(RTRIM(m.score))) + 1, 10)) AS m2
+                                  WHERE m.score IS NOT NULL AND CHARINDEX(':', m.score) > 0
+                              ) ms
+
                               GROUP BY u.user_id, u.name
                               ORDER BY points DESC;
                               """;
