@@ -19,12 +19,55 @@ public class LeaderboardService
 
         var command = connection.CreateCommand();
         command.CommandText = """
-                              SELECT 
+                              SELECT
                                   u.name,
-                                  SUM(CASE WHEN p.score = m.score THEN 1 ELSE 0 END) AS points
+                                  SUM(
+                                      CASE
+                                          WHEN p.score = m.score THEN 3
+                              
+                                          WHEN
+                                              (
+                                                  LEFT(p.score, CHARINDEX(':', p.score) - 1) >
+                                                  SUBSTRING(p.score, CHARINDEX(':', p.score) + 1, 10)
+                              
+                                                  AND
+                              
+                                                  LEFT(m.score, CHARINDEX(':', m.score) - 1) >
+                                                  SUBSTRING(m.score, CHARINDEX(':', m.score) + 1, 10)
+                                              )
+                                          THEN 1
+                              
+                                          WHEN
+                                              (
+                                                  LEFT(p.score, CHARINDEX(':', p.score) - 1) <
+                                                  SUBSTRING(p.score, CHARINDEX(':', p.score) + 1, 10)
+                              
+                                                  AND
+                              
+                                                  LEFT(m.score, CHARINDEX(':', m.score) - 1) <
+                                                  SUBSTRING(m.score, CHARINDEX(':', m.score) + 1, 10)
+                                              )
+                                          THEN 1
+                              
+                                          WHEN
+                                              (
+                                                  LEFT(p.score, CHARINDEX(':', p.score) - 1) =
+                                                  SUBSTRING(p.score, CHARINDEX(':', p.score) + 1, 10)
+                              
+                                                  AND
+                              
+                                                  LEFT(m.score, CHARINDEX(':', m.score) - 1) =
+                                                  SUBSTRING(m.score, CHARINDEX(':', m.score) + 1, 10)
+                                              )
+                                          THEN 1
+                              
+                                          ELSE 0
+                                      END
+                                  ) AS points
                               FROM Users u
                               LEFT JOIN Predictions p ON p.user_id = u.user_id
                               LEFT JOIN Matches m ON m.match_id = p.match_id
+                              WHERE m.score IS NOT NULL
                               GROUP BY u.user_id, u.name
                               ORDER BY points DESC;
                               """;
