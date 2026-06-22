@@ -15,6 +15,7 @@ public class BotUpdateHandler
 {
     private const string PredictButtonText = "Give me next matches for 24 hours";
     private const string LeaderboardButtonText = "Leaderboard";
+    private const string MyPredictionsButtonText = "My predictions";
 
     private const string AddMatchCommand = "/addmatch";
     private const string SetScoreCommand = "/setscore";
@@ -96,6 +97,21 @@ public class BotUpdateHandler
             var leaderboard = await _leaderboardService.GetLeaderboardTextAsync(cancellationToken);
 
             await _botClient.SendMessage(chatId, leaderboard, cancellationToken: cancellationToken);
+            await SendMenuAsync(chatId, cancellationToken);
+            return;
+        }
+        
+        if (text == MyPredictionsButtonText)
+        {
+            var predictions = await _predictionService.GetUserPredictionsTextAsync(
+                userId,
+                cancellationToken);
+
+            await _botClient.SendMessage(
+                chatId,
+                predictions,
+                cancellationToken: cancellationToken);
+
             await SendMenuAsync(chatId, cancellationToken);
             return;
         }
@@ -395,7 +411,8 @@ public class BotUpdateHandler
         var keyboard = new ReplyKeyboardMarkup(new[]
         {
             new KeyboardButton[] { PredictButtonText },
-            new KeyboardButton[] { LeaderboardButtonText }
+            new KeyboardButton[] { LeaderboardButtonText },
+            new KeyboardButton[] { MyPredictionsButtonText }
         })
         {
             ResizeKeyboard = true
