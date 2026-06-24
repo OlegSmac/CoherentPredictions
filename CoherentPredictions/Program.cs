@@ -4,6 +4,7 @@ using Telegram.Bot;
 using CoherentPredictions.Data;
 using CoherentPredictions.Options;
 using CoherentPredictions.Services;
+using CoherentPredictions.Services.Notifications;
 using Microsoft.Extensions.Options;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -27,6 +28,9 @@ builder.Services.AddSingleton<LeaderboardService>();
 
 builder.Services.AddSingleton<BotUpdateHandler>();
 builder.Services.AddHostedService<Worker>();
+
+builder.Services.AddSingleton<NotificationService>();
+builder.Services.AddHostedService<NotificationWorker>();
 
 var host = builder.Build();
 host.Run();
