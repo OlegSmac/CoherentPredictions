@@ -76,7 +76,7 @@ public class PredictionService
         ) ms
 
         WHERE p.user_id = @userId
-        ORDER BY m.[datetime] DESC;
+        ORDER BY m.[datetime] ASC;
         """;
 
         command.Parameters.AddWithValue("@userId", userId);
