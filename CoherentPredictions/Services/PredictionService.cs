@@ -43,41 +43,46 @@ public class PredictionService
 
         var command = connection.CreateCommand();
         command.CommandText = """
-        SELECT
-            m.team1,
-            m.team2,
-            p.score AS prediction,
-            m.score AS final_score,
-            CASE
-                WHEN m.score IS NULL THEN NULL
-                WHEN p.score = m.score THEN 3
+                              SELECT *
+                              FROM (
+                                  SELECT TOP (10)
+                                      m.team1,
+                                      m.team2,
+                                      p.score AS prediction,
+                                      m.score AS final_score,
+                                      m.[datetime],
+                                      CASE
+                                          WHEN m.score IS NULL THEN NULL
+                                          WHEN p.score = m.score THEN 3
 
-                WHEN ps.p1 > ps.p2 AND ms.m1 > ms.m2 THEN 1
-                WHEN ps.p1 < ps.p2 AND ms.m1 < ms.m2 THEN 1
-                WHEN ps.p1 = ps.p2 AND ms.m1 = ms.m2 THEN 1
+                                          WHEN ps.p1 > ps.p2 AND ms.m1 > ms.m2 THEN 1
+                                          WHEN ps.p1 < ps.p2 AND ms.m1 < ms.m2 THEN 1
+                                          WHEN ps.p1 = ps.p2 AND ms.m1 = ms.m2 THEN 1
 
-                ELSE 0
-            END AS points
-        FROM Predictions p
-        INNER JOIN Matches m ON m.match_id = p.match_id
+                                          ELSE 0
+                                      END AS points
+                                  FROM Predictions p
+                                  INNER JOIN Matches m ON m.match_id = p.match_id
 
-        OUTER APPLY (
-            SELECT
-                TRY_CONVERT(INT, LEFT(LTRIM(RTRIM(p.score)), CHARINDEX(':', LTRIM(RTRIM(p.score))) - 1)) AS p1,
-                TRY_CONVERT(INT, SUBSTRING(LTRIM(RTRIM(p.score)), CHARINDEX(':', LTRIM(RTRIM(p.score))) + 1, 10)) AS p2
-            WHERE p.score IS NOT NULL AND CHARINDEX(':', p.score) > 0
-        ) ps
+                                  OUTER APPLY (
+                                      SELECT
+                                          TRY_CONVERT(INT, LEFT(LTRIM(RTRIM(p.score)), CHARINDEX(':', LTRIM(RTRIM(p.score))) - 1)) AS p1,
+                                          TRY_CONVERT(INT, SUBSTRING(LTRIM(RTRIM(p.score)), CHARINDEX(':', LTRIM(RTRIM(p.score))) + 1, 10)) AS p2
+                                      WHERE p.score IS NOT NULL AND CHARINDEX(':', p.score) > 0
+                                  ) ps
 
-        OUTER APPLY (
-            SELECT
-                TRY_CONVERT(INT, LEFT(LTRIM(RTRIM(m.score)), CHARINDEX(':', LTRIM(RTRIM(m.score))) - 1)) AS m1,
-                TRY_CONVERT(INT, SUBSTRING(LTRIM(RTRIM(m.score)), CHARINDEX(':', LTRIM(RTRIM(m.score))) + 1, 10)) AS m2
-            WHERE m.score IS NOT NULL AND CHARINDEX(':', m.score) > 0
-        ) ms
+                                  OUTER APPLY (
+                                      SELECT
+                                          TRY_CONVERT(INT, LEFT(LTRIM(RTRIM(m.score)), CHARINDEX(':', LTRIM(RTRIM(m.score))) - 1)) AS m1,
+                                          TRY_CONVERT(INT, SUBSTRING(LTRIM(RTRIM(m.score)), CHARINDEX(':', LTRIM(RTRIM(m.score))) + 1, 10)) AS m2
+                                      WHERE m.score IS NOT NULL AND CHARINDEX(':', m.score) > 0
+                                  ) ms
 
-        WHERE p.user_id = @userId
-        ORDER BY m.[datetime] ASC;
-        """;
+                                  WHERE p.user_id = @userId
+                                  ORDER BY m.[datetime] DESC
+                              ) t
+                              ORDER BY t.[datetime] ASC;
+                              """;
 
         command.Parameters.AddWithValue("@userId", userId);
 
