@@ -91,8 +91,7 @@ public class PredictionService
         var sb = new StringBuilder();
         sb.AppendLine("📋 My predictions");
         sb.AppendLine();
-
-        var total = 0;
+        
         var hasRows = false;
 
         while (await reader.ReadAsync(cancellationToken))
@@ -103,9 +102,7 @@ public class PredictionService
             var team2 = reader.GetString(1);
             var prediction = reader.GetString(2);
             var finalScore = reader.IsDBNull(3) ? "-" : reader.GetString(3);
-            var points = reader.IsDBNull(4) ? 0 : reader.GetInt32(4);
-
-            total += points;
+            var points = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
 
             sb.AppendLine($"{team1} - {team2}");
             sb.AppendLine($"Your prediction: {prediction}");
@@ -116,8 +113,6 @@ public class PredictionService
 
         if (!hasRows)
             return "You don't have predictions yet.";
-
-        sb.AppendLine($"Total points: {total}");
 
         return sb.ToString();
     }
