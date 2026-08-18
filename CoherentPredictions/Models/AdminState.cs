@@ -7,5 +7,7 @@ public enum AdminState
     AddingTeam2,
     AddingDateTime,
     AddingScore,
-    SettingScore
+    SettingScore,
+    BroadcastWaitingForPhoto,
+    BroadcastWaitingForCaption
 }

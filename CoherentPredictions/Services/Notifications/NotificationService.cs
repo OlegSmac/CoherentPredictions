@@ -79,4 +79,69 @@ public class NotificationService
 
         return result;
     }
+    
+    public async Task SendBroadcastAsync(
+        string photoFileId,
+        string caption,
+        CancellationToken cancellationToken)
+    {
+        var userIds = await GetAllTelegramUserIdsAsync(cancellationToken);
+
+        var sent = 0;
+        var failed = 0;
+
+        foreach (var telegramUserId in userIds)
+        {
+            try
+            {
+                await _botClient.SendPhoto(
+                    chatId: telegramUserId,
+                    photo: photoFileId,
+                    caption: caption,
+                    cancellationToken: cancellationToken);
+
+                sent++;
+            }
+            catch (Exception ex)
+            {
+                failed++;
+
+                _logger.LogWarning(
+                    ex,
+                    "Failed to send broadcast to {TelegramUserId}",
+                    telegramUserId);
+            }
+        }
+
+        _logger.LogInformation(
+            "Broadcast finished. Sent: {Sent}, Failed: {Failed}",
+            sent,
+            failed);
+    }
+    
+    private async Task<List<long>> GetAllTelegramUserIdsAsync(
+        CancellationToken cancellationToken)
+    {
+        await using var connection = _connectionFactory.Create();
+        await connection.OpenAsync(cancellationToken);
+
+        var command = connection.CreateCommand();
+        command.CommandText = """
+                              SELECT DISTINCT telegram_user_id
+                              FROM Users
+                              WHERE telegram_user_id IS NOT NULL;
+                              """;
+
+        var result = new List<long>();
+
+        await using var reader =
+            await command.ExecuteReaderAsync(cancellationToken);
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(reader.GetInt64(0));
+        }
+
+        return result;
+    }
 }

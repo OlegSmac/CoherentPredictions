@@ -9,4 +9,6 @@ public class AdminSession
     public string? Team2 { get; set; }
 
     public DateTime? DateTime { get; set; }
+    
+    public string? BroadcastPhotoFileId { get; set; }
 }

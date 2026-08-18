@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using CoherentPredictions.Models;
 using CoherentPredictions.Options;
+using CoherentPredictions.Services.Notifications;
 using Microsoft.Extensions.Options;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
@@ -20,12 +21,14 @@ public class BotUpdateHandler
     private const string AddMatchCommand = "/addmatch";
     private const string SetScoreCommand = "/setscore";
     private const string AdminCommand = "/admin";
+    private const string BroadcastCommand = "/broadcast";
 
     private readonly ITelegramBotClient _botClient;
     private readonly UserService _userService;
     private readonly MatchService _matchService;
     private readonly PredictionService _predictionService;
     private readonly LeaderboardService _leaderboardService;
+    private readonly NotificationService _notificationService;
     private readonly IOptions<AdminOptions> _adminOptions;
 
     private readonly ConcurrentDictionary<long, PredictionSession> _sessions = new();
@@ -37,6 +40,7 @@ public class BotUpdateHandler
         MatchService matchService,
         PredictionService predictionService,
         LeaderboardService leaderboardService,
+        NotificationService notificationService,
         IOptions<AdminOptions> adminOptions)
     {
         _botClient = botClient;
@@ -44,6 +48,7 @@ public class BotUpdateHandler
         _matchService = matchService;
         _predictionService = predictionService;
         _leaderboardService = leaderboardService;
+        _notificationService = notificationService;
         _adminOptions = adminOptions;
     }
 
@@ -52,22 +57,41 @@ public class BotUpdateHandler
         Update update,
         CancellationToken cancellationToken)
     {
-        if (update.Type != UpdateType.Message || update.Message?.Text is null)
+        if (update.Type != UpdateType.Message || update.Message is null)
             return;
 
         var message = update.Message;
         var chatId = message.Chat.Id;
-        var text = message.Text.Trim();
 
         if (message.From is null)
             return;
 
         var telegramUserId = message.From.Id;
+        var text = message.Text?.Trim();
 
         var userId = await _userService.GetOrCreateUserAsync(
             telegramUserId,
             GetDisplayName(message.From),
             cancellationToken);
+
+        // Handle broadcast photo before checking text,
+        // because photo messages normally have no Message.Text.
+        if (IsAdmin(telegramUserId) &&
+            _adminSessions.TryGetValue(chatId, out var adminSession) &&
+            adminSession.State == AdminState.BroadcastWaitingForPhoto)
+        {
+            await ProcessBroadcastPhotoAsync(
+                chatId,
+                message,
+                adminSession,
+                cancellationToken);
+
+            return;
+        }
+
+        // From this point we only process text messages.
+        if (text is null)
+            return;
 
         if (text == "/start")
         {
@@ -80,13 +104,22 @@ public class BotUpdateHandler
 
         if (IsAdmin(telegramUserId))
         {
-            if (await TryProcessAdminCommandAsync(chatId, text, cancellationToken))
+            if (await TryProcessAdminCommandAsync(
+                    chatId,
+                    text,
+                    cancellationToken))
+            {
                 return;
+            }
         }
 
         if (text == PredictButtonText)
         {
-            await StartPredictionFlowAsync(chatId, userId, cancellationToken);
+            await StartPredictionFlowAsync(
+                chatId,
+                userId,
+                cancellationToken);
+
             return;
         }
 
@@ -94,18 +127,24 @@ public class BotUpdateHandler
         {
             _sessions.TryRemove(chatId, out _);
 
-            var leaderboard = await _leaderboardService.GetLeaderboardTextAsync(cancellationToken);
+            var leaderboard =
+                await _leaderboardService.GetLeaderboardTextAsync(cancellationToken);
 
-            await _botClient.SendMessage(chatId, leaderboard, cancellationToken: cancellationToken);
+            await _botClient.SendMessage(
+                chatId,
+                leaderboard,
+                cancellationToken: cancellationToken);
+
             await SendMenuAsync(chatId, cancellationToken);
             return;
         }
-        
+
         if (text == MyPredictionsButtonText)
         {
-            var predictions = await _predictionService.GetUserPredictionsTextAsync(
-                userId,
-                cancellationToken);
+            var predictions =
+                await _predictionService.GetUserPredictionsTextAsync(
+                    userId,
+                    cancellationToken);
 
             await _botClient.SendMessage(
                 chatId,
@@ -118,7 +157,12 @@ public class BotUpdateHandler
 
         if (_sessions.ContainsKey(chatId))
         {
-            await ProcessPredictionAsync(chatId, userId, text, cancellationToken);
+            await ProcessPredictionAsync(
+                chatId,
+                userId,
+                text,
+                cancellationToken);
+
             return;
         }
 
@@ -128,6 +172,33 @@ public class BotUpdateHandler
             cancellationToken: cancellationToken);
 
         await SendMenuAsync(chatId, cancellationToken);
+    }
+
+    private async Task ProcessBroadcastPhotoAsync(
+        long chatId,
+        Message message,
+        AdminSession adminSession,
+        CancellationToken cancellationToken)
+    {
+        if (message.Photo is null || message.Photo.Length == 0)
+        {
+            await _botClient.SendMessage(
+                chatId,
+                "Please send a photo.",
+                cancellationToken: cancellationToken);
+
+            return;
+        }
+
+        var photo = message.Photo[^1];
+
+        adminSession.BroadcastPhotoFileId = photo.FileId;
+        adminSession.State = AdminState.BroadcastWaitingForCaption;
+
+        await _botClient.SendMessage(
+            chatId,
+            "Now send the message/caption.",
+            cancellationToken: cancellationToken);
     }
 
     private async Task<bool> TryProcessAdminCommandAsync(
@@ -143,6 +214,7 @@ public class BotUpdateHandler
                 Admin commands:
                 /addmatch - add new match
                 /setscore - set match score
+                /broadcast - send photo and message to all users
                 """,
                 cancellationToken: cancellationToken);
 
@@ -158,7 +230,11 @@ public class BotUpdateHandler
                 State = AdminState.AddingTeam1
             };
 
-            await _botClient.SendMessage(chatId, "Enter team 1:", cancellationToken: cancellationToken);
+            await _botClient.SendMessage(
+                chatId,
+                "Enter team 1:",
+                cancellationToken: cancellationToken);
+
             return true;
         }
 
@@ -171,7 +247,9 @@ public class BotUpdateHandler
                 State = AdminState.SettingScore
             };
 
-            var matches = await _matchService.GetMatchesForScoreUpdateAsync(cancellationToken);
+            var matches =
+                await _matchService.GetMatchesForScoreUpdateAsync(
+                    cancellationToken);
 
             await _botClient.SendMessage(
                 chatId,
@@ -181,9 +259,30 @@ public class BotUpdateHandler
             return true;
         }
 
+        if (text == BroadcastCommand)
+        {
+            _sessions.TryRemove(chatId, out _);
+
+            _adminSessions[chatId] = new AdminSession
+            {
+                State = AdminState.BroadcastWaitingForPhoto
+            };
+
+            await _botClient.SendMessage(
+                chatId,
+                "Send the photo you want to broadcast.",
+                cancellationToken: cancellationToken);
+
+            return true;
+        }
+
         if (_adminSessions.ContainsKey(chatId))
         {
-            await ProcessAdminInputAsync(chatId, text, cancellationToken);
+            await ProcessAdminInputAsync(
+                chatId,
+                text,
+                cancellationToken);
+
             return true;
         }
 
@@ -204,7 +303,11 @@ public class BotUpdateHandler
                 session.Team1 = text;
                 session.State = AdminState.AddingTeam2;
 
-                await _botClient.SendMessage(chatId, "Enter team 2:", cancellationToken: cancellationToken);
+                await _botClient.SendMessage(
+                    chatId,
+                    "Enter team 2:",
+                    cancellationToken: cancellationToken);
+
                 return;
 
             case AdminState.AddingTeam2:
@@ -270,9 +373,55 @@ public class BotUpdateHandler
                 return;
 
             case AdminState.SettingScore:
-                await ProcessSetScoreAsync(chatId, text, cancellationToken);
+                await ProcessSetScoreAsync(
+                    chatId,
+                    text,
+                    cancellationToken);
+
+                return;
+
+            case AdminState.BroadcastWaitingForCaption:
+                await ProcessBroadcastCaptionAsync(
+                    chatId,
+                    session,
+                    text,
+                    cancellationToken);
+
                 return;
         }
+    }
+
+    private async Task ProcessBroadcastCaptionAsync(
+        long chatId,
+        AdminSession session,
+        string caption,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(session.BroadcastPhotoFileId))
+        {
+            _adminSessions.TryRemove(chatId, out _);
+
+            await _botClient.SendMessage(
+                chatId,
+                "Broadcast photo was not found. Start again with /broadcast.",
+                cancellationToken: cancellationToken);
+
+            return;
+        }
+
+        await _notificationService.SendBroadcastAsync(
+            session.BroadcastPhotoFileId,
+            caption,
+            cancellationToken);
+
+        _adminSessions.TryRemove(chatId, out _);
+
+        await _botClient.SendMessage(
+            chatId,
+            "Broadcast sent.",
+            cancellationToken: cancellationToken);
+
+        await SendMenuAsync(chatId, cancellationToken);
     }
 
     private async Task ProcessSetScoreAsync(
@@ -280,7 +429,9 @@ public class BotUpdateHandler
         string text,
         CancellationToken cancellationToken)
     {
-        var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var parts = text.Split(
+            ' ',
+            StringSplitOptions.RemoveEmptyEntries);
 
         if (parts.Length != 2 ||
             !int.TryParse(parts[0], out var matchId) ||
@@ -294,7 +445,10 @@ public class BotUpdateHandler
             return;
         }
 
-        await _matchService.SetScoreAsync(matchId, parts[1], cancellationToken);
+        await _matchService.SetScoreAsync(
+            matchId,
+            parts[1],
+            cancellationToken);
 
         _adminSessions.TryRemove(chatId, out _);
 
@@ -311,7 +465,10 @@ public class BotUpdateHandler
         int userId,
         CancellationToken cancellationToken)
     {
-        var matches = await _matchService.GetAvailableMatchesAsync(userId, cancellationToken);
+        var matches =
+            await _matchService.GetAvailableMatchesAsync(
+                userId,
+                cancellationToken);
 
         if (matches.Count == 0)
         {
@@ -332,7 +489,9 @@ public class BotUpdateHandler
             CurrentIndex = 0
         };
 
-        await SendCurrentMatchAsync(chatId, cancellationToken);
+        await SendCurrentMatchAsync(
+            chatId,
+            cancellationToken);
     }
 
     private async Task ProcessPredictionAsync(
@@ -380,7 +539,9 @@ public class BotUpdateHandler
             return;
         }
 
-        await SendCurrentMatchAsync(chatId, cancellationToken);
+        await SendCurrentMatchAsync(
+            chatId,
+            cancellationToken);
     }
 
     private async Task SendCurrentMatchAsync(
@@ -401,7 +562,10 @@ public class BotUpdateHandler
         Enter your prediction, for example: 2:1
         """;
 
-        await _botClient.SendMessage(chatId, text, cancellationToken: cancellationToken);
+        await _botClient.SendMessage(
+            chatId,
+            text,
+            cancellationToken: cancellationToken);
     }
 
     private async Task SendMenuAsync(
@@ -427,20 +591,25 @@ public class BotUpdateHandler
 
     private bool IsAdmin(long telegramUserId)
     {
-        return telegramUserId == _adminOptions.Value.TelegramUserId;
+        return telegramUserId ==
+               _adminOptions.Value.TelegramUserId;
     }
 
     private static bool IsValidScore(string text)
     {
-        return Regex.IsMatch(text, @"^\d{1,2}:\d{1,2}$");
+        return Regex.IsMatch(
+            text,
+            @"^\d{1,2}:\d{1,2}$");
     }
 
-    private static string GetDisplayName(Telegram.Bot.Types.User user)
+    private static string GetDisplayName(
+        Telegram.Bot.Types.User user)
     {
         if (!string.IsNullOrWhiteSpace(user.Username))
             return user.Username;
 
-        var fullName = $"{user.FirstName} {user.LastName}".Trim();
+        var fullName =
+            $"{user.FirstName} {user.LastName}".Trim();
 
         return string.IsNullOrWhiteSpace(fullName)
             ? $"user_{user.Id}"
@@ -456,6 +625,7 @@ public class BotUpdateHandler
         {
             ApiRequestException apiException =>
                 $"Telegram API Error: [{apiException.ErrorCode}] {apiException.Message}",
+
             _ => exception.ToString()
         };
 
